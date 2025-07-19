@@ -12,7 +12,6 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::time::timeout;
-use tokio_postgres::NoTls;
 
 /// secs between polling
 pub const POLL_INTERVAL_SECS: f32 = 10.0;
@@ -224,7 +223,6 @@ pub async fn send_cmd(stream: &mut Stream, cmd: String) -> io::Result<Option<Vec
 
 async fn rest_save_param(
     client: &mut reqwest::Client,
-    name: &str,
     val: f32,
 ) -> Result<()> {
     // fill JSON struct
@@ -240,23 +238,6 @@ async fn rest_save_param(
 
     info!("Response: {}", response.text().await?);
 
-    Ok(())
-}
-
-async fn influx_save_param(
-    client: &mut tokio_postgres::Client,
-    name: &str,
-    val: f32,
-) -> Result<()> {
-    if let Err(e) = client
-        .execute(
-            &format!("INSERT INTO {name} (value) VALUES ($1)"),
-            &[&(val as f64)],
-        )
-        .await
-    {
-        error!("postgres: error inserting: {:?}", e);
-    }
     Ok(())
 }
 
@@ -302,30 +283,10 @@ pub async fn get_param(
         p.unit.unwrap_or_default()
     );
     //let _ = influx_save_param(client, &p.name, converted).await;
-    let _ = rest_save_param(client, &p.name, converted).await;
+    let _ = rest_save_param(client, converted).await;
 
     Ok(())
 }
-
-fn config_read_postgres(conf: Ini) -> std::result::Result<Database, Box<dyn std::error::Error>> {
-    match conf.section(Some("postgres".to_owned())) {
-        Some(section) => Ok(Database {
-            name: "🦏 postgres".to_string(),
-            host: section.get("host").ok_or("missing `host`")?.to_string(),
-            dbname: section.get("dbname").ok_or("missing `dbname`")?.to_string(),
-            username: section
-                .get("username")
-                .ok_or("missing `username`")?
-                .to_string(),
-            password: section
-                .get("password")
-                .ok_or("missing `password`")?
-                .to_string(),
-        }),
-        None => Err("missing [postgres] config section")?,
-    }
-}
-
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
@@ -340,17 +301,6 @@ async fn main() -> Result<()> {
         }
     };
     let mac = get_config_string(conf.clone(), "mac", None)?;
-
-    let db = match config_read_postgres(conf.clone()) {
-        Ok(db) => db,
-        Err(e) => {
-            return Err(format!("Config error [postgres]: {}", e).into());
-        }
-    };
-    let connectionstring = format!(
-        "postgres://{}:{}@{}/{}",
-        db.username, db.password, db.host, db.dbname
-    );
 
     //parse target mac address for bluetooth
     let target_addr: Address = mac.parse().expect("invalid address");
@@ -367,14 +317,6 @@ async fn main() -> Result<()> {
     let params = create_params_table();
     let mut poll_interval = Instant::now();
 
-    /*let (mut client, connection) = tokio_postgres::connect(&connectionstring, NoTls).await?;
-    // The connection object performs the actual communication with the database,
-    // so spawn it off to run on its own.
-    tokio::spawn(async move {
-        if let Err(e) = connection.await {
-            error!("connection error: {}", e);
-        }
-    });*/
     let mut client = Client::new();
 
     'connect: loop {
