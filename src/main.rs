@@ -200,17 +200,7 @@ async fn rest_save_param(
     Ok(())
 }
 
-pub async fn get_param(
-    stream: &mut Stream,
-    p: &Parameter,
-    client: &mut reqwest::Client,
-) -> io::Result<()> {
-    let result = send_command(stream, p).await?;
-    //let _ = influx_save_param(client, &p.name, converted).await;
-    let _ = rest_save_param(client, result).await;
 
-    Ok(())
-}
 
 async fn send_command(stream: &mut Stream, p: &Parameter) -> std::result::Result<f32, Error> {
     let cmd = format!("ATSH{:02x}\r", p.reg_address2);
@@ -307,7 +297,7 @@ async fn main() -> Result<()> {
 
                 for p in &params {
                     debug!("Trying to obtain: {} ({})", p.desc, p.name);
-                    if let Err(e) = get_param(&mut stream, p, &mut client).await {
+                    if let Err(e) = bluetooth_connection.get_param(&mut stream, p, &mut client).await {
                         info!("GET PARAM error for: {}: {:?}", p.name, e);
                         if e.kind() == std::io::ErrorKind::AddrNotAvailable {
                             info!("CAN network down / car is sleeping... waiting 100s");
@@ -341,6 +331,19 @@ struct BluetoothConnection {
 }
 
 impl BluetoothConnection {
+
+    pub async fn get_param(
+        &self,
+        stream: &mut Stream,
+        p: &Parameter,
+        client: &mut reqwest::Client,
+    ) -> io::Result<()> {
+        let result = send_command(stream, p).await?;
+        //let _ = influx_save_param(client, &p.name, converted).await;
+        let _ = rest_save_param(client, result).await;
+
+        Ok(())
+    }
 
     pub async fn wait_for_local_address(&self, stream: &mut Stream) -> Result<()> {
         // the following code is a workaround for a problem described here:
