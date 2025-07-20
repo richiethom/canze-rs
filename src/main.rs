@@ -208,7 +208,8 @@ async fn main() -> Result<()> {
 
                 for p in &params {
                     debug!("Trying to obtain: {} ({})", p.desc, p.name);
-                    if let Err(e) = bluetooth_connection.get_param(&mut stream, p, &mut client).await {
+                    let result = BluetoothConnection::send_command(&mut stream, p).await;
+                    if let Err(e) = result {
                         info!("GET PARAM error for: {}: {:?}", p.name, e);
                         if e.kind() == std::io::ErrorKind::AddrNotAvailable {
                             info!("CAN network down / car is sleeping... waiting 100s");
@@ -223,7 +224,11 @@ async fn main() -> Result<()> {
                             info!("Broken pipe/TimedOut/NotConnected detected ... trying to reconnect");
                             continue 'connect;
                         }
+                    } else {
+                        let _ = rest_save_param(&mut client, result.unwrap()).await;
                     }
+
+
                 }
                 debug!("Got all params, sleeping 10 secs for next cycle");
             }
@@ -242,19 +247,6 @@ struct BluetoothConnection {
 }
 
 impl BluetoothConnection {
-
-    pub async fn get_param(
-        &self,
-        stream: &mut Stream,
-        p: &Parameter,
-        client: &mut reqwest::Client,
-    ) -> io::Result<()> {
-        let result = BluetoothConnection::send_command(stream, p).await?;
-        //let _ = influx_save_param(client, &p.name, converted).await;
-        let _ = rest_save_param(client, result).await;
-
-        Ok(())
-    }
 
     async fn send_command(stream: &mut Stream, p: &Parameter) -> std::result::Result<f32, Error> {
         let cmd = format!("ATSH{:02x}\r", p.reg_address2);
