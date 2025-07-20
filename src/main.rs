@@ -291,7 +291,7 @@ async fn main() -> Result<()> {
 
         info!("connected, poll interval: {}s", POLL_INTERVAL_SECS);
 
-        if send_initialization_commands(&mut stream).await { continue 'connect; }
+        if bluetooth_connection.send_initialization_commands(&mut stream).await { continue 'connect; }
 
         'inner: loop {
             if !running.load(Ordering::SeqCst) {
@@ -354,6 +354,16 @@ impl BluetoothConnection {
         Ok(())
     }
 
+    async fn send_initialization_commands(&self, mut stream: &mut Stream) -> bool {
+        for s in INIT {
+            if let Err(_) = send_cmd(&mut stream, s.to_string()).await {
+                info!("INIT error, reconnect");
+                return true;
+            }
+        }
+        false
+    }
+
     pub fn new(mac_address: String) -> Self {
         //parse target mac address for bluetooth
         let target_addr: Address = mac_address.parse().expect("invalid address");
@@ -376,15 +386,7 @@ impl BluetoothConnection {
     }
 }
 
-async fn send_initialization_commands(mut stream: &mut Stream) -> bool {
-    for s in INIT {
-        if let Err(_) = send_cmd(&mut stream, s.to_string()).await {
-            info!("INIT error, reconnect");
-            return true;
-        }
-    }
-    false
-}
+
 
 fn set_sigterm_support() -> Arc<AtomicBool> {
     let running = Arc::new(AtomicBool::new(true));
