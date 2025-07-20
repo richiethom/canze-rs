@@ -285,9 +285,7 @@ async fn main() -> Result<()> {
 
         bluetooth_connection.wait_for_local_address(&mut stream).await?;
 
-        info!("Local address: {:?}", stream.as_ref().local_addr()?);
-        //info!("Remote address: {:?}", stream.peer_addr()?);
-        info!("Security: {:?}", stream.as_ref().security()?);
+
 
         info!("connected, poll interval: {}s", POLL_INTERVAL_SECS);
 
@@ -351,6 +349,11 @@ impl BluetoothConnection {
                 break;
             }
         }
+
+        info!("Local address: {:?}", stream.as_ref().local_addr()?);
+        //info!("Remote address: {:?}", stream.peer_addr()?);
+        info!("Security: {:?}", stream.as_ref().security()?);
+
         Ok(())
     }
 
