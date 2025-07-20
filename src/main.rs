@@ -266,12 +266,7 @@ async fn main() -> Result<()> {
     let target_sa = SocketAddr::new(target_addr, 1u8);
 
     //Ctrl-C / SIGTERM support
-    let running = Arc::new(AtomicBool::new(true));
-    let r = running.clone();
-    ctrlc::set_handler(move || {
-        r.store(false, Ordering::SeqCst);
-    })
-    .expect("Error setting Ctrl-C handler");
+    let running = set_sigterm_support();
 
     let params = create_params_table();
     let mut poll_interval = Instant::now();
@@ -355,4 +350,14 @@ async fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+fn set_sigterm_support() -> Arc<AtomicBool> {
+    let running = Arc::new(AtomicBool::new(true));
+    let r = running.clone();
+    ctrlc::set_handler(move || {
+        r.store(false, Ordering::SeqCst);
+    })
+        .expect("Error setting Ctrl-C handler");
+    running
 }
