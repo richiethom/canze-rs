@@ -273,6 +273,10 @@ async fn main() -> Result<()> {
 
     let mut client = Client::new();
 
+    let bluetooth_connection = BluetoothConnection {
+        mac_address: mac
+    };
+
     'connect: loop {
         if !running.load(Ordering::SeqCst) {
             info!("🛑 Ctrl-C or SIGTERM signal detected, exiting...");
@@ -280,13 +284,9 @@ async fn main() -> Result<()> {
         }
 
         tokio::time::sleep(Duration::from_secs(10)).await;
-        info!("Connecting to: {:?}", &target_sa);
-        let res = Stream::connect(target_sa).await;
-        let mut stream = if let Ok(s) = res {
-            s
-        } else {
-            info!("Cannot connect (BT dongle not in range?)");
-            continue;
+        let mut stream = match get_bluetooth_connection(target_sa).await {
+            Some(value) => value,
+            None => continue,
         };
 
         // the following code is a workaround for a problem described here:
@@ -345,6 +345,22 @@ async fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+async fn get_bluetooth_connection(target_sa: SocketAddr) -> Option<Stream> {
+    info!("Connecting to: {:?}", &target_sa);
+    let res = Stream::connect(target_sa).await;
+    let stream = if let Ok(s) = res {
+        s
+    } else {
+        info!("Cannot connect (BT dongle not in range?)");
+        return None;
+    };
+    Some(stream)
+}
+
+struct BluetoothConnection {
+    mac_address: String,
 }
 
 async fn send_initialization_commands(mut stream: &mut Stream) -> bool {
