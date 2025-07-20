@@ -81,15 +81,6 @@ impl Parameter {
     }
 }
 
-#[derive(Clone)]
-pub struct Database {
-    pub name: String,
-    pub host: String,
-    pub dbname: String,
-    pub username: String,
-    pub password: String,
-}
-
 fn create_params_table() -> Vec<Parameter> {
     vec![
         Parameter::new(
