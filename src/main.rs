@@ -283,18 +283,7 @@ async fn main() -> Result<()> {
             None => continue,
         };
 
-        // the following code is a workaround for a problem described here:
-        // https://github.com/bluez/bluer/discussions/130#discussioncomment-8845113
-        debug!("Local address before: {:?}", stream.as_ref().local_addr()?);
-        let mut i = 0;
-        while stream.as_ref().local_addr()?.addr == bluer::Address::any() {
-            debug!("Waiting for local address...");
-            tokio::time::sleep(Duration::from_secs(1)).await;
-            i += 1;
-            if i > 5 {
-                break;
-            }
-        }
+        wait_for_local_address(&mut stream).await?;
 
         info!("Local address: {:?}", stream.as_ref().local_addr()?);
         //info!("Remote address: {:?}", stream.peer_addr()?);
@@ -341,6 +330,21 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+async fn wait_for_local_address(stream: &mut Stream) -> Result<()> {
+    // the following code is a workaround for a problem described here:
+    // https://github.com/bluez/bluer/discussions/130#discussioncomment-8845113
+    debug!("Local address before: {:?}", stream.as_ref().local_addr()?);
+    let mut i = 0;
+    while stream.as_ref().local_addr()?.addr == bluer::Address::any() {
+        debug!("Waiting for local address...");
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        i += 1;
+        if i > 5 {
+            break;
+        }
+    }
+    Ok(())
+}
 
 struct BluetoothConnection {
     mac_address: SocketAddr,
