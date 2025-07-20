@@ -107,38 +107,6 @@ fn create_params_table() -> Vec<Parameter> {
                 Ok(x)
             }),
         ),
-        /*Parameter::new(
-            "odometer",
-            "Total vehicle distance",
-            Some("km"),
-            0x222006,
-            0x7ec,
-            0x7e4,
-            Box::new(|val| Ok(val as f32)),
-        ),
-        Parameter::new(
-            "soh",
-            "SOH",
-            Some("%"),
-            0x223206,
-            0x7ec,
-            0x7e4,
-            Box::new(|val| Ok((val & 0xffff) as f32 * 0.05)),
-        ),
-        Parameter::new(
-            "active_power",
-            "Mains active power consumed",
-            Some("W"),
-            0x22504A,
-            0x793,
-            0x792,
-            Box::new(|val| {
-                Ok(((val & 0xffff)
-                    .checked_sub(20000)
-                    .ok_or(Error::new(ErrorKind::AddrNotAvailable, "substract error"))?)
-                    as f32)
-            }),
-        ),*/
     ]
 }
 
