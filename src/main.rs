@@ -133,53 +133,6 @@ fn get_config_string(conf: Ini, option_name: &str, section: Option<&str>) -> io:
         ))
 }
 
-pub async fn send_cmd(stream: &mut Stream, cmd: String) -> io::Result<Option<Vec<u8>>> {
-    let mut buffer = vec![0u8; 512];
-    let mut output_cmd: Vec<u8> = vec![];
-    let out: Option<Vec<u8>>;
-
-    output_cmd.extend(cmd.as_bytes());
-    output_cmd.push(b'\r');
-    debug!("write: {}", String::from_utf8_lossy(&output_cmd));
-    if let Err(e) = stream.write_all(&output_cmd).await {
-        error!("write error: {:?}", e);
-        return Err(e.into());
-    }
-
-    let mut packet = BufReader::new(stream);
-    let retval = packet.read_until(EOM2, &mut buffer);
-    match timeout(Duration::from_secs_f32(5.0), retval).await {
-        Ok(res) => match res {
-            Ok(len) => {
-                if len == 0 {
-                    error!("file read error: 0 bytes");
-                    return Err(Error::new(ErrorKind::Other, "0 bytes read"));
-                }
-                out = Some(buffer.clone());
-                trace!("Response: {:?}", buffer);
-                let ascii = String::from_utf8_lossy(&buffer);
-                debug!("Response ASCII (len={}): {}", len, ascii);
-                if ascii.contains("NO DATA") {
-                    return Err(Error::new(ErrorKind::Other, "no data"));
-                }
-                if ascii.contains("7F 22 12") {
-                    return Err(Error::new(ErrorKind::Other, "Service Not Supported"));
-                }
-            }
-            Err(e) => {
-                error!("file read error: {}", e);
-                return Err(e.into());
-            }
-        },
-        Err(e) => {
-            error!("response timeout: {}", e);
-            return Err(e.into());
-        }
-    }
-
-    Ok(out)
-}
-
 async fn rest_save_param(
     client: &mut reqwest::Client,
     val: f32,
@@ -198,48 +151,6 @@ async fn rest_save_param(
     info!("Response: {}", response.text().await?);
 
     Ok(())
-}
-
-
-
-async fn send_command(stream: &mut Stream, p: &Parameter) -> std::result::Result<f32, Error> {
-    let cmd = format!("ATSH{:02x}\r", p.reg_address2);
-    send_cmd(stream, cmd).await?;
-    let cmd = format!("ATCRA{:02x}\r", p.reg_address);
-    send_cmd(stream, cmd).await?;
-    let cmd = format!("ATFCSH{:02x}\r", p.reg_address2);
-    send_cmd(stream, cmd).await?;
-    let cmd = format!("10C0\r");
-    let _ = send_cmd(stream, cmd).await;
-    let cmd = format!("{:02x}\r", p.cmd);
-    let out = send_cmd(stream, cmd).await?.unwrap();
-    let mut raw_string = String::from_utf8_lossy(&out);
-    raw_string = raw_string
-        .chars()
-        .filter(|c| c.is_ascii_hexdigit())
-        .collect::<String>()
-        .into();
-    debug!("got response for {}: {}", p.name, raw_string);
-
-    //get an u32 value from a response hex string
-    if raw_string.len() < 6 {
-        return Err(Error::new(ErrorKind::Other, "response empty or too short!"));
-    }
-    let val = u32::from_str_radix(&raw_string[raw_string.len() - 6..raw_string.len()], 16);
-    if let Err(_) = val {
-        return Err(Error::new(ErrorKind::Other, "conversion error!"));
-    }
-    //use an associated parameter converter for a value
-    let converted = (p.convert)(val.unwrap())?;
-
-    info!(
-        "{} ({}): {} {}",
-        p.desc,
-        p.name,
-        converted,
-        p.unit.unwrap_or_default()
-    );
-    Ok(converted)
 }
 
 #[tokio::main]
@@ -338,11 +249,98 @@ impl BluetoothConnection {
         p: &Parameter,
         client: &mut reqwest::Client,
     ) -> io::Result<()> {
-        let result = send_command(stream, p).await?;
+        let result = BluetoothConnection::send_command(stream, p).await?;
         //let _ = influx_save_param(client, &p.name, converted).await;
         let _ = rest_save_param(client, result).await;
 
         Ok(())
+    }
+
+    async fn send_command(stream: &mut Stream, p: &Parameter) -> std::result::Result<f32, Error> {
+        let cmd = format!("ATSH{:02x}\r", p.reg_address2);
+        BluetoothConnection::send_cmd(stream, cmd).await?;
+        let cmd = format!("ATCRA{:02x}\r", p.reg_address);
+        BluetoothConnection::send_cmd(stream, cmd).await?;
+        let cmd = format!("ATFCSH{:02x}\r", p.reg_address2);
+        BluetoothConnection::send_cmd(stream, cmd).await?;
+        let cmd = format!("10C0\r");
+        let _ = BluetoothConnection::send_cmd(stream, cmd).await;
+        let cmd = format!("{:02x}\r", p.cmd);
+        let out = BluetoothConnection::send_cmd(stream, cmd).await?.unwrap();
+        let mut raw_string = String::from_utf8_lossy(&out);
+        raw_string = raw_string
+            .chars()
+            .filter(|c| c.is_ascii_hexdigit())
+            .collect::<String>()
+            .into();
+        debug!("got response for {}: {}", p.name, raw_string);
+
+        //get an u32 value from a response hex string
+        if raw_string.len() < 6 {
+            return Err(Error::new(ErrorKind::Other, "response empty or too short!"));
+        }
+        let val = u32::from_str_radix(&raw_string[raw_string.len() - 6..raw_string.len()], 16);
+        if let Err(_) = val {
+            return Err(Error::new(ErrorKind::Other, "conversion error!"));
+        }
+        //use an associated parameter converter for a value
+        let converted = (p.convert)(val.unwrap())?;
+
+        info!(
+        "{} ({}): {} {}",
+        p.desc,
+        p.name,
+        converted,
+        p.unit.unwrap_or_default()
+    );
+        Ok(converted)
+    }
+
+    async fn send_cmd(stream: &mut Stream, cmd: String) -> io::Result<Option<Vec<u8>>> {
+        let mut buffer = vec![0u8; 512];
+        let mut output_cmd: Vec<u8> = vec![];
+        let out: Option<Vec<u8>>;
+
+        output_cmd.extend(cmd.as_bytes());
+        output_cmd.push(b'\r');
+        debug!("write: {}", String::from_utf8_lossy(&output_cmd));
+        if let Err(e) = stream.write_all(&output_cmd).await {
+            error!("write error: {:?}", e);
+            return Err(e.into());
+        }
+
+        let mut packet = BufReader::new(stream);
+        let retval = packet.read_until(EOM2, &mut buffer);
+        match timeout(Duration::from_secs_f32(5.0), retval).await {
+            Ok(res) => match res {
+                Ok(len) => {
+                    if len == 0 {
+                        error!("file read error: 0 bytes");
+                        return Err(Error::new(ErrorKind::Other, "0 bytes read"));
+                    }
+                    out = Some(buffer.clone());
+                    trace!("Response: {:?}", buffer);
+                    let ascii = String::from_utf8_lossy(&buffer);
+                    debug!("Response ASCII (len={}): {}", len, ascii);
+                    if ascii.contains("NO DATA") {
+                        return Err(Error::new(ErrorKind::Other, "no data"));
+                    }
+                    if ascii.contains("7F 22 12") {
+                        return Err(Error::new(ErrorKind::Other, "Service Not Supported"));
+                    }
+                }
+                Err(e) => {
+                    error!("file read error: {}", e);
+                    return Err(e.into());
+                }
+            },
+            Err(e) => {
+                error!("response timeout: {}", e);
+                return Err(e.into());
+            }
+        }
+
+        Ok(out)
     }
 
     pub async fn wait_for_local_address(&self, stream: &mut Stream) -> Result<()> {
@@ -368,7 +366,7 @@ impl BluetoothConnection {
 
     async fn send_initialization_commands(&self, mut stream: &mut Stream) -> bool {
         for s in INIT {
-            if let Err(_) = send_cmd(&mut stream, s.to_string()).await {
+            if let Err(_) = BluetoothConnection::send_cmd(&mut stream, s.to_string()).await {
                 info!("INIT error, reconnect");
                 return true;
             }
