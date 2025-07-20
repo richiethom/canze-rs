@@ -308,12 +308,7 @@ async fn main() -> Result<()> {
 
         info!("connected, poll interval: {}s", POLL_INTERVAL_SECS);
 
-        for s in INIT {
-            if let Err(_) = send_cmd(&mut stream, s.to_string()).await {
-                info!("INIT error, reconnect");
-                continue 'connect;
-            }
-        }
+        if send_initialization_commands(&mut stream).await { continue 'connect; }
 
         'inner: loop {
             if !running.load(Ordering::SeqCst) {
@@ -350,6 +345,16 @@ async fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+async fn send_initialization_commands(mut stream: &mut Stream) -> bool {
+    for s in INIT {
+        if let Err(_) = send_cmd(&mut stream, s.to_string()).await {
+            info!("INIT error, reconnect");
+            return true;
+        }
+    }
+    false
 }
 
 fn set_sigterm_support() -> Arc<AtomicBool> {
