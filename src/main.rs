@@ -261,10 +261,6 @@ async fn main() -> Result<()> {
     };
     let mac = get_config_string(conf.clone(), "mac", None)?;
 
-    //parse target mac address for bluetooth
-    let target_addr: Address = mac.parse().expect("invalid address");
-    let target_sa = SocketAddr::new(target_addr, 1u8);
-
     //Ctrl-C / SIGTERM support
     let running = set_sigterm_support();
 
@@ -273,9 +269,7 @@ async fn main() -> Result<()> {
 
     let mut client = Client::new();
 
-    let bluetooth_connection = BluetoothConnection {
-        mac_address: mac
-    };
+    let bluetooth_connection = BluetoothConnection::new(mac);
 
     'connect: loop {
         if !running.load(Ordering::SeqCst) {
@@ -284,7 +278,7 @@ async fn main() -> Result<()> {
         }
 
         tokio::time::sleep(Duration::from_secs(10)).await;
-        let mut stream = match get_bluetooth_connection(target_sa).await {
+        let mut stream = match bluetooth_connection.get_bluetooth_connection().await {
             Some(value) => value,
             None => continue,
         };
@@ -347,20 +341,33 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-async fn get_bluetooth_connection(target_sa: SocketAddr) -> Option<Stream> {
-    info!("Connecting to: {:?}", &target_sa);
-    let res = Stream::connect(target_sa).await;
-    let stream = if let Ok(s) = res {
-        s
-    } else {
-        info!("Cannot connect (BT dongle not in range?)");
-        return None;
-    };
-    Some(stream)
-}
 
 struct BluetoothConnection {
-    mac_address: String,
+    mac_address: SocketAddr,
+}
+
+impl BluetoothConnection {
+
+    pub fn new(mac_address: String) -> Self {
+        //parse target mac address for bluetooth
+        let target_addr: Address = mac_address.parse().expect("invalid address");
+        let target_sa = SocketAddr::new(target_addr, 1u8);
+        Self {
+            mac_address: target_sa
+        }
+    }
+
+    pub async fn get_bluetooth_connection(&self) -> Option<Stream> {
+        info!("Connecting to: {:?}", self.mac_address);
+        let res = Stream::connect(self.mac_address).await;
+        let stream = if let Ok(s) = res {
+            s
+        } else {
+            info!("Cannot connect (BT dongle not in range?)");
+            return None;
+        };
+        Some(stream)
+    }
 }
 
 async fn send_initialization_commands(mut stream: &mut Stream) -> bool {
