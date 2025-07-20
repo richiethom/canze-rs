@@ -205,6 +205,14 @@ pub async fn get_param(
     p: &Parameter,
     client: &mut reqwest::Client,
 ) -> io::Result<()> {
+    let result = send_command(stream, p).await?;
+    //let _ = influx_save_param(client, &p.name, converted).await;
+    let _ = rest_save_param(client, result).await;
+
+    Ok(())
+}
+
+async fn send_command(stream: &mut Stream, p: &Parameter) -> std::result::Result<f32, Error> {
     let cmd = format!("ATSH{:02x}\r", p.reg_address2);
     send_cmd(stream, cmd).await?;
     let cmd = format!("ATCRA{:02x}\r", p.reg_address);
@@ -241,11 +249,9 @@ pub async fn get_param(
         converted,
         p.unit.unwrap_or_default()
     );
-    //let _ = influx_save_param(client, &p.name, converted).await;
-    let _ = rest_save_param(client, converted).await;
-
-    Ok(())
+    Ok(converted)
 }
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
