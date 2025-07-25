@@ -240,13 +240,20 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-
+trait DurationSource {
+    async fn send_command(stream: &mut Stream, p: &Parameter) -> std::result::Result<f32, Error>;
+    async fn send_cmd(stream: &mut Stream, cmd: String) -> io::Result<Option<Vec<u8>>>;
+    async fn wait_for_local_address(&self, stream: &mut Stream) -> Result<()>;
+    async fn send_initialization_commands(&self, stream: &mut Stream) -> bool;
+    fn new(mac_address: String) -> Self;
+    async fn get_bluetooth_connection(&self) -> Option<Stream>;
+}
 
 struct BluetoothConnection {
     mac_address: SocketAddr,
 }
 
-impl BluetoothConnection {
+impl DurationSource for BluetoothConnection {
 
     async fn send_command(stream: &mut Stream, p: &Parameter) -> std::result::Result<f32, Error> {
         let cmd = format!("ATSH{:02x}\r", p.reg_address2);
@@ -335,7 +342,7 @@ impl BluetoothConnection {
         Ok(out)
     }
 
-    pub async fn wait_for_local_address(&self, stream: &mut Stream) -> Result<()> {
+    async fn wait_for_local_address(&self, stream: &mut Stream) -> Result<()> {
         // the following code is a workaround for a problem described here:
         // https://github.com/bluez/bluer/discussions/130#discussioncomment-8845113
         debug!("Local address before: {:?}", stream.as_ref().local_addr()?);
@@ -366,7 +373,7 @@ impl BluetoothConnection {
         false
     }
 
-    pub fn new(mac_address: String) -> Self {
+    fn new(mac_address: String) -> Self {
         //parse target mac address for bluetooth
         let target_addr: Address = mac_address.parse().expect("invalid address");
         let target_sa = SocketAddr::new(target_addr, 1u8);
@@ -375,7 +382,7 @@ impl BluetoothConnection {
         }
     }
 
-    pub async fn get_bluetooth_connection(&self) -> Option<Stream> {
+    async fn get_bluetooth_connection(&self) -> Option<Stream> {
         info!("Connecting to: {:?}", self.mac_address);
         let res = Stream::connect(self.mac_address).await;
         let stream = if let Ok(s) = res {
