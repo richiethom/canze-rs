@@ -53,49 +53,50 @@ pub struct Parameter {
     name: String,
     desc: String,
     unit: Option<&'static str>,
-    cmd: u32,
-    reg_address: u16,
-    reg_address2: u16,
-    convert: Box<dyn Fn(u32) -> io::Result<f32>>,
+    cmd: Vec<u8>,
+    send_id: u16,
+    receive_id: u16,
+    convert: Box<dyn Fn(&[u8]) -> io::Result<f32>>,
 }
 
 impl Parameter {
     pub fn new(
-        name: &'static str,
-        desc: &'static str,
+        name: &str,
+        desc: &str,
         unit: Option<&'static str>,
-        cmd: u32,
-        reg_address: u16,
-        reg_address2: u16,
-        convert: Box<dyn Fn(u32) -> io::Result<f32>>,
+        cmd: Vec<u8>,
+        send_id: u16,
+        receive_id: u16,
+        convert: Box<dyn Fn(&[u8]) -> io::Result<f32>>,
     ) -> Self {
         Self {
-            name: String::from(name),
-            desc: String::from(desc),
+            name: name.to_string(),
+            desc: desc.to_string(),
             unit,
             cmd,
-            reg_address,
-            reg_address2,
+            send_id,
+            receive_id,
             convert,
         }
     }
 }
 
+
 fn create_params_table() -> Vec<Parameter> {
     vec![
         Parameter::new(
             "soc",
-            "SOC",
+            "State of Charge",
             Some("%"),
-            0x222002,
-            0x7ec,
-            0x7e4,
-            Box::new(|val| {
-                let x: f32 = (val - 0x20000) as f32 * 0.02;
-                if x == 0.0 {
-                    return Err(Error::new(ErrorKind::AddrNotAvailable, "CAN network down"));
+            vec![0x22, 0x01, 0x01], // UDS Mode 22, PID 0x0101
+            0x7DF, // Send to functional broadcast
+            0x7E8, // Expect response from engine ECU
+            Box::new(|data| {
+                if data.len() < 6 || data[0] != 0x62 || data[1] != 0x01 || data[2] != 0x01 {
+                    return Err(Error::new(ErrorKind::InvalidData, "Unexpected SOC response"));
                 }
-                Ok(x)
+                let soc = data[3] as f32;
+                Ok(soc)
             }),
         ),
     ]
@@ -205,34 +206,40 @@ pub async fn get_param(
     p: &Parameter,
     client: &mut reqwest::Client,
 ) -> io::Result<()> {
-    let cmd = format!("ATSH{:02x}\r", p.reg_address2);
+    // Set the CAN transmit ID (e.g. 0x7DF)
+    let cmd = format!("ATSH{:03X}\r", p.send_id);
     send_cmd(stream, cmd).await?;
-    let cmd = format!("ATCRA{:02x}\r", p.reg_address);
+    let cmd = format!("ATCRA{:03X}\r", p.receive_id);
     send_cmd(stream, cmd).await?;
-    let cmd = format!("ATFCSH{:02x}\r", p.reg_address2);
-    send_cmd(stream, cmd).await?;
-    let cmd = format!("10C0\r");
-    let _ = send_cmd(stream, cmd).await;
-    let cmd = format!("{:02x}\r", p.cmd);
-    let out = send_cmd(stream, cmd).await?.unwrap();
-    let mut raw_string = String::from_utf8_lossy(&out);
-    raw_string = raw_string
+    // Construct ISO-TP single-frame message: length + command bytes
+    let mut request = vec![p.cmd.len() as u8]; // First byte = length
+    request.extend_from_slice(&p.cmd);
+
+    let cmd = request.iter().map(|b| format!("{:02X}", b)).collect::<String>() + "\r";
+    let raw = send_cmd(stream, cmd).await?.unwrap();
+
+    // Filter hex digits and parse into bytes
+    let hex_str: String = String::from_utf8_lossy(&raw)
         .chars()
         .filter(|c| c.is_ascii_hexdigit())
-        .collect::<String>()
-        .into();
-    debug!("got response for {}: {}", p.name, raw_string);
+        .collect();
 
-    //get an u32 value from a response hex string
-    if raw_string.len() < 6 {
-        return Err(Error::new(ErrorKind::Other, "response empty or too short!"));
+    if hex_str.len() % 2 != 0 {
+        return Err(Error::new(ErrorKind::InvalidData, "Odd number of hex digits"));
     }
-    let val = u32::from_str_radix(&raw_string[raw_string.len() - 6..raw_string.len()], 16);
-    if let Err(_) = val {
-        return Err(Error::new(ErrorKind::Other, "conversion error!"));
-    }
-    //use an associated parameter converter for a value
-    let converted = (p.convert)(val.unwrap())?;
+
+    let bytes_result = (0..hex_str.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&hex_str[i..i + 2], 16))
+        .collect::<std::result::Result<Vec<u8>, _>>();
+
+    let bytes = bytes_result
+        .map_err(|_| Error::new(ErrorKind::InvalidData, "Failed to decode hex response"))?;
+
+    debug!("got response for {}: {:?}", p.name, bytes);
+
+    // Apply converter
+    let converted = (p.convert)(&bytes)?;
 
     info!(
         "{} ({}): {} {}",
@@ -241,11 +248,13 @@ pub async fn get_param(
         converted,
         p.unit.unwrap_or_default()
     );
-    //let _ = influx_save_param(client, &p.name, converted).await;
+
+    // Store it
     let _ = rest_save_param(client, converted).await;
 
     Ok(())
 }
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
